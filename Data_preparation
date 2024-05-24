@@ -1,0 +1,99 @@
+#Read in the processed VCF file
+gene_vcf<-read.vcfR("gene.vcf")
+
+gene_info<- gene_vcf@fix[, "ID"] #extract ID of all variants
+
+gene_info <- data.frame(ID= gene_info)  #convert to data frame
+
+gene_info$AC<-extract.info(gene_vcf,
+element = "AC",
+mask = FALSE,
+as.numeric=TRUE) #extract allele counts for all variants
+
+genotype<-extract.gt(
+gene_vcf,
+element = "GT",
+mask = FALSE,
+as.numeric = FALSE,
+return.alleles = FALSE,
+IDtoRowNames = TRUE,
+extract = TRUE,
+convertNA = TRUE
+)  #extract genotypes for all variants
+
+genotype<-as.data.frame(genotype)
+genotype <- rownames_to_column(genotype, var = "ID")
+
+gene_info <- merge(gene_info, genotype, by = "ID", all = TRUE)  # Merge the genotype information into data frame containing gene information. Use 'all = TRUE' to keep all rows from both data frames
+
+
+gene_coldata <- gene_info[c(1084,1526), ]  #Extract the rows containing deleterious variants. Replace 1084 and 1526 with the relevant rows. 
+
+#A function to convert the genotypes (currently formatted as 0|0) to a number indicating the AC for each individual
+count_ones <- function(x) {
+x_numeric <- as.numeric(unlist(strsplit(as.character(x), "|")))
+sum(x_numeric == 1, na.rm = TRUE)
+} 
+
+#Apply the function to the deleterious variants data frame
+for (j in 3:ncol(gene_coldata)) {
+  gene_coldata[, j] <- sapply(gene_coldata[, j], count_ones)
+}
+
+gene_coldata<-as.data.frame(gene_coldata)
+
+gene_coldata <- ifelse(gene_coldata  > 0, "deleterious", "healthy")  #convert these allele counts to either deleterious (if AC>0) or healthy (if AC=0)
+gene_coldata<-t(gene_coldata)  #transpose the data frame so the individuals are now rows, and the variants columns
+
+#add a column specifying if there are any instances of deleterious variants in a column/individual. replace 1084 and 1526 with the current rownames. 
+gene_coldata$condition <- apply(gene_coldata[, c("1084","1526")], 1, function(row) {
+    if ("deleterious" %in% row) {
+        return("deleterious")
+    } else {
+        return("healthy")
+    }
+})
+
+
+#remove the first 2 rows (ID and AC) and all columns other than the 'condition' column. This should leave a df with only 1 column (condition), with the sample names as the row names.
+gene_coldata<-gene_coldata[,-c(1:2),drop=FALSE]
+gene_coldata <- gene_coldata[-c(1:2), , drop = FALSE]
+gene_coldata$samples <- rownames(gene_coldata) #add a column for the sample names.
+
+#Read in unnormalised RNA-seq count data
+count_data <- read.table("GD660.GeneQuantCount.txt", row.names = 1) 
+
+#Remove the first 3 columns which contain information like ID (which we have made the rownames). This will leave only the columns containing read counts.
+count_data <- count_data[,-c(1:3)]
+
+#The first row of the file contains a long library name where the first 7 characters correspond to the sample names from the VCF file. Extract these characters and make them the column names
+colnames(count_data)<-substr(count_data[1,], 1, 7)
+
+#Some samples have been sequenced twice and hence there are duplicates - extract the names of these columns. 
+duplicates<-names(count_data)[duplicated(names(count_data))]
+
+
+duplicated_rows<-NULL
+
+# The same duplicates do not exist in our coldata data frame but for DESeq2 we need the number of columns in count_data to equal the number of rows in coldata (same number of samples in each). Therefore we must duplicate the corresponding rows in coldata (which just contains the healthy/carrier status of the samples).
+for (col_name in duplicates) {
+    duplicated_row <- gene_coldata[col_name, ,drop = FALSE] 
+    if (is.null(duplicated_rows)) {
+    duplicated_rows <- duplicated_row
+  } else {
+    duplicated_rows <- rbind(duplicated_rows, duplicated_row)
+  }
+}
+gene_coldata <- rbind(gene_coldata, duplicated_rows)
+
+#Add any missing sample names from the RNA-seq data to the coldata frame
+gene_coldata <- gene_coldata[colnames(count_data), , drop = FALSE]
+
+#These rows will now have a sample name but were not in the VCF file so there is no allele count information. We must identify these samples and then remove them from both the coldata and count_data data frames. 
+na_rows<-which(is.na(gene_coldata$samples))
+count_data <- count_data[,-na_rows]
+gene_coldata <- gene_coldata[-na_rows, ]
+
+#Write our files to a csv
+write.csv(gene_coldata, "genecoldata.csv", row.names = FALSE)
+write.csv(count_data, "count_data.csv", row.names = TRUE)
