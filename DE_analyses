@@ -1,24 +1,5 @@
-#VCF file extraction and DESeq2 analysis for each gene. Replace 'gene' with the relevant gene name.
 
-#Extract Gene from 1000 genomes phase 3 dataset:
-
-bcftools view -r chr:genestart-geneend 1kGP_high_coverage_Illumina.chr<>.filtered.SNV_INDEL_SV_phased_panel.vcf.gz -o /g/data/te53/zc4688/rna/gene.vcf
-
-#Subset samples in to include only those in the RNA-seq dataset. Samples is a text file containing a list of all the included individuals. 
-
-bcftools view -S samples.txt gene.vcf -o /g/data/te53/zc4688/rna/NSUN2_samples.vcf --force-samples
-
-#Set minimum AC to 1
-
-bcftools view -c 1 gene.vcf -o gene.vcf
-
-
-
-#VCF files were then processed in R following the scripts in file 'Data_processing' to produce a count_data file (from the RNA-seq data) and a coldata file (from both the RNA-seq data and the VCF file)
-
-in r
-
-
+#DESEq2 analysis, performed in R
 gene_coldata<- read.csv("gene_coldata.csv")
 
 rownames(gene_coldata) <-make.names(gene_coldata[,2], unique=TRUE)
